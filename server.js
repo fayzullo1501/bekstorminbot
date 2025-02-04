@@ -33,7 +33,7 @@ app.get('/webhook', (req, res) => {
     }
 });
 
-// ✅ Webhook для Instagram (получение комментариев)
+// ✅ Webhook для Instagram (комментарии и Direct)
 app.post('/webhook', (req, res) => {
     const body = req.body;
 
@@ -42,6 +42,14 @@ app.post('/webhook', (req, res) => {
             entry.changes?.forEach(change => {
                 if (change.field === "comments" && change.value) {
                     handleComment(change.value);
+                }
+            });
+        });
+    } else if (body.object === 'page') { // 👈 Теперь обрабатываем и входящие Direct
+        body.entry.forEach(entry => {
+            entry.messaging?.forEach(event => {
+                if (event.message && event.sender) {
+                    handleDirectMessage(event);
                 }
             });
         });
@@ -90,9 +98,21 @@ async function handleComment(event) {
     await replyToComment(commentId);
 
     const senderId = event.from.id;
-    const directMessage = "Ассалому алейкум, маълумот олиш учун қуйидаги +998999961696 рақамга қўнғироқ қилинг";
+    const directMessage = "Ассалому алейкум! Маълумот олиш учун қуйидаги +998999961696 рақамга қўнғироқ қилинг.";
     
     await sendMessage(senderId, directMessage);
+}
+
+// ✅ Обработка входящих сообщений в Direct
+async function handleDirectMessage(event) {
+    const senderId = event.sender.id;
+    const messageText = event.message.text;
+
+    console.log(`📩 Получено сообщение в Direct от ${senderId}: "${messageText}"`);
+
+    const replyText = "Ассалому алейкум! Маълумот олиш учун қуйидаги +998999961696 рақамга қўнғироқ қилинг.";
+
+    await sendMessage(senderId, replyText);
 }
 
 app.listen(PORT, "0.0.0.0", () => console.log(`✅ Server is running on port ${PORT}`));
