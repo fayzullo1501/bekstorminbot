@@ -1,118 +1,99 @@
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
+require("dotenv").config();
+const express = require("express");
+const axios = require("axios");
+const bodyParser = require("body-parser");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
-const INSTAGRAM_ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID;
-const VERIFY_TOKEN = "verify_123"; // Должно совпадать с Meta
 
-if (!PAGE_ACCESS_TOKEN || !INSTAGRAM_ACCOUNT_ID) {
-    console.error("❌ Ошибка: Переменные окружения PAGE_ACCESS_TOKEN и INSTAGRAM_ACCOUNT_ID не установлены.");
-    process.exit(1);
-}
+app.use(bodyParser.json());
 
-app.use(express.json());
+// 📌 Вебхук для получения сообщений и комментариев
+app.get("/webhook", (req, res) => {
+    let VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+    
+    let mode = req.query["hub.mode"];
+    let token = req.query["hub.verify_token"];
+    let challenge = req.query["hub.challenge"];
 
-app.get('/', (req, res) => {
-    res.send("Instagram Bot is running...");
-});
-
-// ✅ Верификация Webhook от Meta
-app.get('/webhook', (req, res) => {
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-
-    if (mode === "subscribe" && token === VERIFY_TOKEN) {
-        console.log("WEBHOOK_VERIFIED");
+    if (mode && token === VERIFY_TOKEN) {
         res.status(200).send(challenge);
     } else {
         res.sendStatus(403);
     }
 });
 
-// ✅ Webhook для Instagram (комментарии и Direct)
-app.post('/webhook', (req, res) => {
-    const body = req.body;
+app.post("/webhook", async (req, res) => {
+    let body = req.body;
+    
+    if (body.object === "instagram") {
+        body.entry.forEach(async (entry) => {
+            let changes = entry.changes;
+            changes.forEach(async (change) => {
+                if (change.field === "messages") {
+                    let fromId = change.value.from.id;
+                    await sendDirectMessage(fromId);
+                }
+                if (change.field === "comments") {
+                    let commentId = change.value.id;
+                    let fromId = change.value.from.id;
+                    let text = change.value.text;
 
-    if (body.object === 'instagram') {
-        body.entry.forEach(entry => {
-            entry.changes?.forEach(change => {
-                if (change.field === "comments" && change.value) {
-                    handleComment(change.value);
+                    if (!text.includes("@")) {
+                        await replyToComment(commentId);
+                        await sendDirectMessage(fromId);
+                    }
                 }
             });
         });
-    } else if (body.object === 'page') { // 👈 Теперь обрабатываем и входящие Direct
-        body.entry.forEach(entry => {
-            entry.messaging?.forEach(event => {
-                if (event.message && event.sender) {
-                    handleDirectMessage(event);
-                }
-            });
-        });
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(404);
     }
-
-    res.sendStatus(200);
 });
 
-// ✅ Функция для отправки сообщений в Direct
-async function sendMessage(recipientId, messageText) {
+// 📌 Функция отправки сообщения в директ
+async function sendDirectMessage(userId) {
+    let message = "Ассалому алейкум, батафсил маълумот олишингиз учун куйидаги ракамга 123445 конгирок килин, йоки оператор жавобини кутин.";
+
     try {
-        await axios.post(`https://graph.facebook.com/v18.0/${INSTAGRAM_ACCOUNT_ID}/messages`, {
-            recipient: { id: recipientId },
-            message: { text: messageText }
-        }, {
-            headers: { Authorization: `Bearer ${PAGE_ACCESS_TOKEN}` }
-        });
+        await axios.post(
+            `https://graph.facebook.com/v18.0/${process.env.INSTAGRAM_ID}/messages`,
+            {
+                recipient: { id: userId },
+                message: { text: message },
+            },
+            {
+                headers: { Authorization: `Bearer ${process.env.ACCESS_TOKEN}` },
+            }
+        );
+        console.log(`📩 Сообщение отправлено пользователю: ${userId}`);
     } catch (error) {
-        console.error("❌ Ошибка при отправке сообщения: ", error.response?.data || error.message);
+        console.error("⚠️ Ошибка при отправке сообщения:", error.response ? error.response.data : error.message);
     }
 }
 
-// ✅ Ответ на комментарий
+// 📌 Функция ответа на комментарий
 async function replyToComment(commentId) {
-    const messageText = "Direct га ёздик";
-    
+    let message = "Директга йоздик.";
+
     try {
-        await axios.post(`https://graph.facebook.com/v18.0/${commentId}/replies`, {
-            message: messageText
-        }, {
-            headers: { Authorization: `Bearer ${PAGE_ACCESS_TOKEN}` }
-        });
+        await axios.post(
+            `https://graph.facebook.com/v18.0/${commentId}/replies`,
+            {
+                message: message,
+            },
+            {
+                headers: { Authorization: `Bearer ${process.env.ACCESS_TOKEN}` },
+            }
+        );
+        console.log(`💬 Ответ в комментариях отправлен: ${commentId}`);
     } catch (error) {
-        console.error("❌ Ошибка при ответе на комментарий: ", error.response?.data || error.message);
+        console.error("⚠️ Ошибка при ответе на комментарий:", error.response ? error.response.data : error.message);
     }
 }
 
-// ✅ Обработка комментариев
-async function handleComment(event) {
-    if (!event.comment_id || !event.from || !event.from.id) {
-        console.error("❌ Ошибка: Некорректные данные комментария", event);
-        return;
-    }
-
-    const commentId = event.comment_id;
-    await replyToComment(commentId);
-
-    const senderId = event.from.id;
-    const directMessage = "Ассалому алейкум! Маълумот олиш учун қуйидаги +998999961696 рақамга қўнғироқ қилинг.";
-    
-    await sendMessage(senderId, directMessage);
-}
-
-// ✅ Обработка входящих сообщений в Direct
-async function handleDirectMessage(event) {
-    const senderId = event.sender.id;
-    const messageText = event.message.text;
-
-    console.log(`📩 Получено сообщение в Direct от ${senderId}: "${messageText}"`);
-
-    const replyText = "Ассалому алейкум! Маълумот олиш учун қуйидаги +998999961696 рақамга қўнғироқ қилинг.";
-
-    await sendMessage(senderId, replyText);
-}
-
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ Server is running on port ${PORT}`));
+// 📌 Запускаем сервер
+app.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
+});
